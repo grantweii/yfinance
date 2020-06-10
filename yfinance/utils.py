@@ -41,21 +41,36 @@ def empty_df(index=[]):
     empty.index.name = 'Date'
     return empty
 
+def getRequiredStores(page):
+    if page not in ['info', 'financials', 'cashflow']:
+        raise ValueError('Page of type info, financials or cashflow need to be provided')
 
-def get_json(url, proxy=None):
+    if page == 'info':
+        return ['QuoteSummaryStore']
+    elif page == 'financials':
+        return ['QuoteSummaryStore', 'QuoteTimeSeriesStore']
+    elif page == 'cashflow':
+        return ['QuoteTimeSeriesStore']
+
+
+def get_json(url, page, proxy=None):
+    stores = getRequiredStores(page)
+
     html = _requests.get(url=url, proxies=proxy).text
 
-    if "QuoteSummaryStore" not in html:
-        html = _requests.get(url=url, proxies=proxy).text
-        if "QuoteSummaryStore" not in html:
-            return {}
+    for store in stores:
+        if store not in html:
+            html = _requests.get(url=url, proxies=proxy).text
+            if store not in html:
+                return {}
 
     json_str = html.split('root.App.main =')[1].split(
         '(this)')[0].split(';\n}')[0].strip()
-    data = _json.loads(json_str)[
-        'context']['dispatcher']['stores']['QuoteSummaryStore']
 
     # return data
+    allDataStores = _json.loads(json_str)['context']['dispatcher']['stores']
+    data = { store: allDataStores[store] for store in stores if store in allDataStores.keys() }
+
     new_data = _json.dumps(data).replace('{}', 'null')
     new_data = _re.sub(
         r'\{[\'|\"]raw[\'|\"]:(.*?),(.*?)\}', r'\1', new_data)

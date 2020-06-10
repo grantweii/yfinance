@@ -3,3 +3,7 @@ yfinance/__pycache__/*
 dist
 yfinance.egg-info
 *.pyc
+env/*
+.vscode/*
+yfinance/data/*
+test.py

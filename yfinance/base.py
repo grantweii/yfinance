@@ -277,7 +277,7 @@ class TickerBase():
 
         # get info and sustainability
         url = '%s/%s' % (self._scrape_url, self.ticker)
-        data = utils.get_json(url, proxy)
+        infoData = utils.get_json(url, 'info', proxy)['QuoteSummaryStore']
 
         # holders
         url = "{}/{}".format(self._scrape_url, self.ticker)
@@ -293,10 +293,10 @@ class TickerBase():
 
         # sustainability
         d = {}
-        if isinstance(data.get('esgScores'), dict):
-            for item in data['esgScores']:
-                if not isinstance(data['esgScores'][item], (dict, list)):
-                    d[item] = data['esgScores'][item]
+        if isinstance(infoData.get('esgScores'), dict):
+            for item in infoData['esgScores']:
+                if not isinstance(infoData['esgScores'][item], (dict, list)):
+                    d[item] = infoData['esgScores'][item]
 
             s = _pd.DataFrame(index=[0], data=d)[-1:].T
             s.columns = ['Value']
@@ -312,8 +312,8 @@ class TickerBase():
         items = ['summaryProfile', 'summaryDetail', 'quoteType',
                  'defaultKeyStatistics', 'assetProfile', 'summaryDetail']
         for item in items:
-            if isinstance(data.get(item), dict):
-                self._info.update(data[item])
+            if isinstance(infoData.get(item), dict):
+                self._info.update(infoData[item])
 
         self._info['regularMarketPrice'] = self._info['regularMarketOpen']
         self._info['logo_url'] = ""
@@ -327,7 +327,7 @@ class TickerBase():
         # events
         try:
             cal = _pd.DataFrame(
-                data['calendarEvents']['earnings'])
+                infoData['calendarEvents']['earnings'])
             cal['earningsDate'] = _pd.to_datetime(
                 cal['earningsDate'], unit='s')
             self._calendar = cal.T
@@ -339,7 +339,7 @@ class TickerBase():
         # analyst recommendations
         try:
             rec = _pd.DataFrame(
-                data['upgradeDowngradeHistory']['history'])
+                infoData['upgradeDowngradeHistory']['history'])
             rec['earningsDate'] = _pd.to_datetime(
                 rec['epochGradeDate'], unit='s')
             rec.set_index('earningsDate', inplace=True)
@@ -351,7 +351,8 @@ class TickerBase():
             pass
 
         # get fundamentals
-        data = utils.get_json(url+'/financials', proxy)
+        financialsData = utils.get_json(url+'/financials', 'financials', proxy)
+        financialsSummaryData = financialsData['QuoteSummaryStore']
 
         # generic patterns
         for key in (
@@ -361,16 +362,16 @@ class TickerBase():
         ):
 
             item = key[1] + 'History'
-            if isinstance(data.get(item), dict):
-                key[0]['yearly'] = cleanup(data[item][key[2]])
+            if isinstance(financialsSummaryData.get(item), dict):
+                key[0]['yearly'] = cleanup(financialsSummaryData[item][key[2]])
 
             item = key[1]+'HistoryQuarterly'
-            if isinstance(data.get(item), dict):
-                key[0]['quarterly'] = cleanup(data[item][key[2]])
+            if isinstance(financialsSummaryData.get(item), dict):
+                key[0]['quarterly'] = cleanup(financialsSummaryData[item][key[2]])
 
         # earnings
-        if isinstance(data.get('earnings'), dict):
-            earnings = data['earnings']['financialsChart']
+        if isinstance(financialsSummaryData.get('earnings'), dict):
+            earnings = financialsSummaryData['earnings']['financialsChart']
             df = _pd.DataFrame(earnings['yearly']).set_index('date')
             df.columns = utils.camel2title(df.columns)
             df.index.name = 'Year'
@@ -382,6 +383,13 @@ class TickerBase():
             self._earnings['quarterly'] = df
 
         self._fundamentals = True
+
+        # TODO: Data currently is retrieved correctly just need to store and return to user
+        # append to current cash flow endpoint
+        # cashflow
+        url = '%s/%s/cash-flow' % (self._scrape_url, self.ticker)
+        _time.sleep(1) # add delay before another request
+        cashflowData = utils.get_json(url, 'cashflow', proxy)['QuoteTimeSeriesStore']
 
     def get_recommendations(self, proxy=None, as_dict=False, *args, **kwargs):
         self._get_fundamentals(proxy)
