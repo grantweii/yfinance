@@ -247,37 +247,74 @@ class TickerBase():
 
     # ------------------------
 
-    def _get_fundamentals(self, kind=None, proxy=None):
-        def cleanup(data):
-            df = _pd.DataFrame(data).drop(columns=['maxAge'])
-            for col in df.columns:
-                df[col] = _np.where(
-                    df[col].astype(str) == '-', _np.nan, df[col])
+    def cleanup(self, data):
+        df = _pd.DataFrame(data).drop(columns=['maxAge'])
+        for col in df.columns:
+            df[col] = _np.where(
+                df[col].astype(str) == '-', _np.nan, df[col])
 
-            df.set_index('endDate', inplace=True)
-            try:
-                df.index = _pd.to_datetime(df.index, unit='s')
-            except ValueError:
-                df.index = _pd.to_datetime(df.index)
-            df = df.T
-            df.columns.name = ''
-            df.index.name = 'Breakdown'
+        df.set_index('endDate', inplace=True)
+        try:
+            df.index = _pd.to_datetime(df.index, unit='s')
+        except ValueError:
+            df.index = _pd.to_datetime(df.index)
+        df = df.T
+        df.columns.name = ''
+        df.index.name = 'Breakdown'
 
-            df.index = utils.camel2title(df.index)
-            return df
+        df.index = utils.camel2title(df.index)
+        return df
 
+    def setup_proxy(self, proxy=None):
         # setup proxy in requests format
         if proxy is not None:
             if isinstance(proxy, dict) and "https" in proxy:
                 proxy = proxy["https"]
             proxy = {"https": proxy}
+        return proxy
 
-        if self._fundamentals:
-            return
+    
+    def _get_financials(self, kind=None, proxy=None):
+        proxy = self.setup_proxy(proxy)
 
-        # get info and sustainability
+        # get financials
         url = '%s/%s' % (self._scrape_url, self.ticker)
-        infoData = utils.get_json(url, 'info', proxy)['QuoteSummaryStore']
+        financialsData = utils.get_json(url+'/financials', 'financials', proxy)
+        financialsSummaryData = financialsData['QuoteSummaryStore']
+        financialsTimeSeriesData = financialsData['QuoteTimeSeriesStore']
+
+        # generic patterns
+        for key in (
+            (self._cashflow, 'cashflowStatement', 'cashflowStatements'),
+            (self._balancesheet, 'balanceSheet', 'balanceSheetStatements'),
+            (self._financials, 'incomeStatement', 'incomeStatementHistory')
+        ):
+
+            item = key[1] + 'History'
+            if isinstance(financialsSummaryData.get(item), dict):
+                key[0]['yearly'] = self.cleanup(financialsSummaryData[item][key[2]])
+
+            item = key[1]+'HistoryQuarterly'
+            if isinstance(financialsSummaryData.get(item), dict):
+                key[0]['quarterly'] = self.cleanup(financialsSummaryData[item][key[2]])
+
+        # earnings
+        if isinstance(financialsSummaryData.get('earnings'), dict):
+            earnings = financialsSummaryData['earnings']['financialsChart']
+            df = _pd.DataFrame(earnings['yearly']).set_index('date')
+            df.columns = utils.camel2title(df.columns)
+            df.index.name = 'Year'
+            self._earnings['yearly'] = df
+
+            df = _pd.DataFrame(earnings['quarterly']).set_index('date')
+            df.columns = utils.camel2title(df.columns)
+            df.index.name = 'Quarter'
+            self._earnings['quarterly'] = df
+
+        self._fundamentals = True
+
+    def _get_holders(self, kind=None, proxy=None):
+        proxy = self.setup_proxy(proxy)
 
         # holders
         url = "{}/{}".format(self._scrape_url, self.ticker)
@@ -291,6 +328,23 @@ class TickerBase():
             if '% Out' in self._institutional_holders:
                 self._institutional_holders['% Out'] = self._institutional_holders[
                     '% Out'].str.replace('%', '').astype(float)/100
+
+    # TODO: Data currently is retrieved correctly just need to store and return to user
+    # append to current cash flow endpoint
+    # cashflow
+    def _get_cashflow(self, kind=None, proxy=None):
+        proxy = self.setup_proxy(proxy)
+
+        url = '%s/%s/cash-flow' % (self._scrape_url, self.ticker)
+        _time.sleep(1) # add delay before another request
+        cashflowData = utils.get_json(url, 'cashflow', proxy)['QuoteTimeSeriesStore']
+
+    def _get_sustainability(self, kind=None, proxy=None):
+        proxy = self.setup_proxy(proxy)
+
+        # get sustainability
+        url = '%s/%s' % (self._scrape_url, self.ticker)
+        infoData = utils.get_json(url, 'info', proxy)['QuoteSummaryStore']
 
         # sustainability
         d = {}
@@ -307,6 +361,13 @@ class TickerBase():
 
             self._sustainability = s[~s.index.isin(
                 ['maxAge', 'ratingYear', 'ratingMonth'])]
+
+    def _get_info(self, kind=None, proxy=None):
+        proxy = self.setup_proxy(proxy)
+
+        # get info
+        url = '%s/%s' % (self._scrape_url, self.ticker)
+        infoData = utils.get_json(url, 'info', proxy)['QuoteSummaryStore']
 
         # info (be nice to python 2)
         self._info = {}
@@ -325,7 +386,14 @@ class TickerBase():
         except Exception:
             pass
 
-        # events
+    def _get_events(self, kind=None, proxy=None):
+        proxy = self.setup_proxy(proxy)
+
+        # get events
+        url = '%s/%s' % (self._scrape_url, self.ticker)
+        infoData = utils.get_json(url, 'info', proxy)['QuoteSummaryStore']
+
+         # events
         try:
             cal = _pd.DataFrame(
                 infoData['calendarEvents']['earnings'])
@@ -336,6 +404,13 @@ class TickerBase():
             self._calendar.columns = ['Value']
         except Exception:
             pass
+
+    def _get_recommendations(self, kind=None, proxy=None):
+        proxy = self.setup_proxy(proxy)
+
+        # get recommendations
+        url = '%s/%s' % (self._scrape_url, self.ticker)
+        infoData = utils.get_json(url, 'info', proxy)['QuoteSummaryStore']
 
         # analyst recommendations
         try:
@@ -351,106 +426,64 @@ class TickerBase():
         except Exception:
             pass
 
-        # get fundamentals
-        financialsData = utils.get_json(url+'/financials', 'financials', proxy)
-        financialsSummaryData = financialsData['QuoteSummaryStore']
-        financialsTimeSeriesData = financialsData['QuoteTimeSeriesStore']
-
-        # generic patterns
-        for key in (
-            (self._cashflow, 'cashflowStatement', 'cashflowStatements'),
-            (self._balancesheet, 'balanceSheet', 'balanceSheetStatements'),
-            (self._financials, 'incomeStatement', 'incomeStatementHistory')
-        ):
-
-            item = key[1] + 'History'
-            if isinstance(financialsSummaryData.get(item), dict):
-                key[0]['yearly'] = cleanup(financialsSummaryData[item][key[2]])
-
-            item = key[1]+'HistoryQuarterly'
-            if isinstance(financialsSummaryData.get(item), dict):
-                key[0]['quarterly'] = cleanup(financialsSummaryData[item][key[2]])
-
-        # earnings
-        if isinstance(financialsSummaryData.get('earnings'), dict):
-            earnings = financialsSummaryData['earnings']['financialsChart']
-            df = _pd.DataFrame(earnings['yearly']).set_index('date')
-            df.columns = utils.camel2title(df.columns)
-            df.index.name = 'Year'
-            self._earnings['yearly'] = df
-
-            df = _pd.DataFrame(earnings['quarterly']).set_index('date')
-            df.columns = utils.camel2title(df.columns)
-            df.index.name = 'Quarter'
-            self._earnings['quarterly'] = df
-
-        self._fundamentals = True
-
-        # TODO: Data currently is retrieved correctly just need to store and return to user
-        # append to current cash flow endpoint
-        # cashflow
-        url = '%s/%s/cash-flow' % (self._scrape_url, self.ticker)
-        _time.sleep(1) # add delay before another request
-        cashflowData = utils.get_json(url, 'cashflow', proxy)['QuoteTimeSeriesStore']
-
     def get_recommendations(self, proxy=None, as_dict=False, *args, **kwargs):
-        self._get_fundamentals(proxy)
+        self._get_recommendations(proxy)
         data = self._recommendations
         if as_dict:
             return data.to_dict()
         return data
 
     def get_calendar(self, proxy=None, as_dict=False, *args, **kwargs):
-        self._get_fundamentals(proxy)
+        self._get_events(proxy)
         data = self._calendar
         if as_dict:
             return data.to_dict()
         return data
 
     def get_major_holders(self, proxy=None, as_dict=False, *args, **kwargs):
-        self._get_fundamentals(proxy)
+        self._get_holders(proxy)
         data = self._major_holders
         if as_dict:
             return data.to_dict()
         return data
 
     def get_institutional_holders(self, proxy=None, as_dict=False, *args, **kwargs):
-        self._get_fundamentals(proxy)
+        self._get_holders(proxy)
         data = self._institutional_holders
         if as_dict:
             return data.to_dict()
         return data
 
     def get_info(self, proxy=None, as_dict=False, *args, **kwargs):
-        self._get_fundamentals(proxy)
+        self._get_info(proxy)
         data = self._info
         if as_dict:
             return data.to_dict()
         return data
 
     def get_sustainability(self, proxy=None, as_dict=False, *args, **kwargs):
-        self._get_fundamentals(proxy)
+        self._get_sustainability(proxy)
         data = self._sustainability
         if as_dict:
             return data.to_dict()
         return data
 
     def get_earnings(self, proxy=None, as_dict=False, freq="yearly"):
-        self._get_fundamentals(proxy)
+        self._get_financials(proxy)
         data = self._earnings[freq]
         if as_dict:
             return data.to_dict()
         return data
 
     def get_financials(self, proxy=None, as_dict=False, freq="yearly"):
-        self._get_fundamentals(proxy)
+        self._get_financials(proxy)
         data = self._financials[freq]
         if as_dict:
             return data.to_dict()
         return data
 
     def get_balancesheet(self, proxy=None, as_dict=False, freq="yearly"):
-        self._get_fundamentals(proxy)
+        self._get_financials(proxy)
         data = self._balancesheet[freq]
         if as_dict:
             return data.to_dict()
@@ -460,7 +493,7 @@ class TickerBase():
         return self.get_balancesheet(proxy, as_dict, freq)
 
     def get_cashflow(self, proxy=None, as_dict=False, freq="yearly"):
-        self._get_fundamentals(proxy)
+        self._get_financials(proxy)
         data = self._cashflow[freq]
         if as_dict:
             return data.to_dict()
