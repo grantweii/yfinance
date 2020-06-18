@@ -34,7 +34,7 @@ except ImportError:
 
 from . import utils
 
-# import json as _json
+import json as _json
 # import re as _re
 # import sys as _sys
 
@@ -247,24 +247,6 @@ class TickerBase():
 
     # ------------------------
 
-    def cleanup(self, data):
-        df = _pd.DataFrame(data).drop(columns=['maxAge'])
-        for col in df.columns:
-            df[col] = _np.where(
-                df[col].astype(str) == '-', _np.nan, df[col])
-
-        df.set_index('endDate', inplace=True)
-        try:
-            df.index = _pd.to_datetime(df.index, unit='s')
-        except ValueError:
-            df.index = _pd.to_datetime(df.index)
-        df = df.T
-        df.columns.name = ''
-        df.index.name = 'Breakdown'
-
-        df.index = utils.camel2title(df.index)
-        return df
-
     def setup_proxy(self, proxy=None):
         # setup proxy in requests format
         if proxy is not None:
@@ -275,13 +257,63 @@ class TickerBase():
 
     
     def _get_financials(self, kind=None, proxy=None):
+        def cleanup(data):
+            df = _pd.DataFrame(data).drop(columns=['maxAge'])
+            for col in df.columns:
+                df[col] = _np.where(
+                    df[col].astype(str) == '-', _np.nan, df[col])
+
+            df.set_index('endDate', inplace=True)
+            try:
+                df.index = _pd.to_datetime(df.index, unit='s')
+            except ValueError:
+                df.index = _pd.to_datetime(df.index)
+            df = df.T
+            df.columns.name = ''
+            df.index.name = 'Breakdown'
+            df.index = utils.camel2title(df.index)
+            return df
+
         proxy = self.setup_proxy(proxy)
 
         # get financials
         url = '%s/%s' % (self._scrape_url, self.ticker)
         financialsData = utils.get_json(url+'/financials', 'financials', proxy)
         financialsSummaryData = financialsData['QuoteSummaryStore']
-        financialsTimeSeriesData = financialsData['QuoteTimeSeriesStore']
+
+        # num shares API call
+        url = 'https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/%s?lang=en-AU&region=AU&symbol=%spadTimeSeries=true&type=annualDilutedAverageShares,annualBasicAverageShares,quarterlyDilutedAverageShares,quarterlyBasicAverageShares&merge=false&period1=493590046&period2=%s&corsDomain=au.finance.yahoo.com' % (self.ticker, self.ticker, int(_time.time()))
+        financialsTimeSeriesData = _json.loads(_requests.get(url=url).text)['timeseries']['result']
+
+        def appendExtraDetails(key, financialsSummaryData, financialsTimeSeriesData, timeSeries):
+            summaryList = financialsSummaryData[timeSeries]['incomeStatementHistory']
+            numSharesDict = next(filter(lambda x: x['meta']['type'][0] == key[0], financialsTimeSeriesData), None)
+            for statement in summaryList:
+                endDate = statement['endDate']
+                index = numSharesDict['timestamp'].index(endDate)
+
+                if index is None:
+                    raise ValueError('No matching end date for %s' % (endDate))
+                
+                value = numSharesDict[key[0]][index]['reportedValue']['raw'] # value in scientific notation
+                statement[key[1]] = value
+                netIncome = statement['netIncome']
+                eps = netIncome/value
+                statement[key[2]] = eps
+
+        if isinstance(financialsSummaryData.get('incomeStatementHistory'), dict):
+            for key in (
+                ('annualBasicAverageShares', 'basicAverageShares', 'basicEPS'),
+                ('annualDilutedAverageShares', 'dilutedAverageShares', 'dilutedEPS')
+            ):
+                appendExtraDetails(key, financialsSummaryData, financialsTimeSeriesData, 'incomeStatementHistory')
+
+        if isinstance(financialsSummaryData.get('incomeStatementHistoryQuarterly'), dict):
+            for key in (
+                ('quarterlyBasicAverageShares', 'basicAverageShares', 'basicEPS'),
+                ('quarterlyDilutedAverageShares', 'dilutedAverageShares', 'dilutedEPS')
+            ):
+                appendExtraDetails(key, financialsSummaryData, financialsTimeSeriesData, 'incomeStatementHistoryQuarterly')
 
         # generic patterns
         for key in (
@@ -289,14 +321,13 @@ class TickerBase():
             (self._balancesheet, 'balanceSheet', 'balanceSheetStatements'),
             (self._financials, 'incomeStatement', 'incomeStatementHistory')
         ):
-
             item = key[1] + 'History'
             if isinstance(financialsSummaryData.get(item), dict):
-                key[0]['yearly'] = self.cleanup(financialsSummaryData[item][key[2]])
+                key[0]['yearly'] = cleanup(financialsSummaryData[item][key[2]])
 
             item = key[1]+'HistoryQuarterly'
             if isinstance(financialsSummaryData.get(item), dict):
-                key[0]['quarterly'] = self.cleanup(financialsSummaryData[item][key[2]])
+                key[0]['quarterly'] = cleanup(financialsSummaryData[item][key[2]])
 
         # earnings
         if isinstance(financialsSummaryData.get('earnings'), dict):
