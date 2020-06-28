@@ -31,7 +31,7 @@ import pandas as _pd
 # import re as _re
 from collections import namedtuple as _namedtuple
 
-from .base import TickerBase
+from .ticker_base import TickerBase
 
 
 class Ticker(TickerBase):
@@ -103,6 +103,12 @@ class Ticker(TickerBase):
             "puts": self._options2df(options['puts'], tz=tz)
         })
 
+    def store_premium_financials(self):
+        return self.get_premium_financials()
+
+    def store_premium_quarterly_financials(self):
+        return self.get_premium_financials(freq='quarterly')
+
     # ------------------------
 
     @property
@@ -116,10 +122,6 @@ class Ticker(TickerBase):
     @property
     def institutional_holders(self):
         return self.get_institutional_holders()
-
-    @property
-    def dividends(self):
-        return self.get_dividends()
 
     @property
     def dividends(self):

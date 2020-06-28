@@ -25,7 +25,7 @@ __author__ = "Ran Aroussi"
 from .ticker import Ticker
 from .tickers import Tickers
 from .multi import download
-
+from .base import Base
 
 def pdr_override():
     """
@@ -41,4 +41,4 @@ def pdr_override():
         pass
 
 
-__all__ = ['download', 'Ticker', 'Tickers', 'pdr_override']
+__all__ = ['download', 'Ticker', 'Tickers', 'pdr_override', 'Base']

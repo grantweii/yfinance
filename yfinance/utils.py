@@ -27,11 +27,66 @@ import pandas as _pd
 import numpy as _np
 import sys as _sys
 import re as _re
+import random
+from requests_futures.sessions import FuturesSession
+from requests.packages.urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 try:
     import ujson as _json
 except ImportError:
     import json as _json
+
+DEFAULT_TIMEOUT = 5
+
+USER_AGENT_LIST = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.129 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36',
+]
+
+class TimeoutHTTPAdapter(HTTPAdapter):
+    def __init__(self, *args, **kwargs):
+        self.timeout = DEFAULT_TIMEOUT
+        if "timeout" in kwargs:
+            self.timeout = kwargs['timeout']
+            del kwargs['timeout']
+        super(TimeoutHTTPAdapter, self).__init__(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        timeout = kwargs.get('timeout')
+        if timeout is None:
+            kwargs['timeout'] = self.timeout
+        return super(TimeoutHTTPAdapter, self).send(request, **kwargs)
+
+def _init_session(session, **kwargs):
+    if session is None:
+        if kwargs.get('asynchronous'):
+            session = FuturesSession(max_workers=kwargs.get('max_workers', 8))
+        else:
+            session = _requests.Session()
+        if kwargs.get('proxies'):
+            session.proxies = kwargs.get('proxies')
+        retries = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            method_whitelist=["HEAD", "GET", "OPTIONS", "POST", "TRACE"])
+        session.mount('https://', TimeoutHTTPAdapter(
+            max_retries=retries,
+            timeout=kwargs.get('timeout', DEFAULT_TIMEOUT)))
+        # TODO: Figure out how to utilize this within the validate_response
+        # TODO: This will be a much better way of handling bad requests than
+        # TODO: what I'm currently doing.
+        # session.hooks['response'] = \
+        #     [lambda response, *args, **kwargs: response.raise_for_status()]
+        session.headers.update({
+            "User-Agent": random.choice(USER_AGENT_LIST)
+        })
+    return session
 
 
 def empty_df(index=[]):
@@ -53,10 +108,15 @@ def getRequiredStores(page):
         return ['QuoteTimeSeriesStore']
 
 
-def get_json(url, page, proxy=None):
+def get_json(url, page, driver=None, proxy=None):
     stores = getRequiredStores(page)
 
-    html = _requests.get(url=url, proxies=proxy).text
+    print('url to retrieve', url)
+    if driver is not None:
+        driver.get(url)
+        html = driver.page_source
+    else:
+        html = _requests.get(url=url, proxies=proxy).text
 
     for store in stores:
         if store not in html:
