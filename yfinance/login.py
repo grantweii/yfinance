@@ -65,8 +65,6 @@ class Login(object):
             if crumb:
                 crumb = crumb[0].replace('\\u002F', '/')
             # self.driver.quit()
-            print('cookies are', cookies)
-            print('crumbs are', crumb)
             return {'cookies': cookies, 'crumb': crumb}
         except TimeoutException:
             return "A timeout exception has occured.  Most likely it's due to \

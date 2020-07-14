@@ -44,12 +44,14 @@ from . import shared
 
 
 class TickerBase():
-    def __init__(self, ticker, driver, **kwargs):
+    def __init__(self, ticker, driver, session, **kwargs):
         self.ticker = ticker.upper()
         self.driver = driver
         self._history = None
         self._base_url = 'https://query1.finance.yahoo.com'
         self._scrape_url = 'https://finance.yahoo.com/quote'
+
+        self.session = session
 
         self._fundamentals = False
         self._info = None
@@ -355,37 +357,100 @@ class TickerBase():
 
         self._fundamentals = True
 
-    # requires login and public IP located in the US
-    # retrieves the financials data from the QuoteTimeSeriesStore rather than the QuoteSummaryStore
-    # which has a different JSON structure so it cleans the data differently
-    # API call for number of shares not required because it is already in the QuoteTimeSeriesStore
-    # TODO: to retrieve quarterly, need to simulate quarterly button click
-    def _store_premium_financials(self, kind=None, proxy=None):
+    # requires yahoo premium account and public IP located in the US
+    def _store_premium_financials(self, freq, proxy=None, errorWriter=None, successWriter=None):
         def store(data):
-            timeseries = data.get('timeSeries')
-            timestamps = timeseries.pop('timestamp')
-            with open('../datafiles/{}.csv'.format(self.ticker), 'w', newline='') as csvFile:
+            print('Storing annual %s' % self.ticker)
+            jsonData = json.loads(data)
+            timeseries = jsonData.get('timeseries').get('result')
+            with open('../datafiles/fundamentals/nasdaq/annual/{}.csv'.format(self.ticker), 'w', newline='') as csvFile:
                 writer = csv.writer(csvFile)
-                # put header in before looping through the data
                 writer.writerow(['date', 'entry', 'figure'])
-                for key, value in timeseries.items():
-                    if key.startswith('annual') and len(value) > 0:
-                        if len(value) != len(timestamps):
-                            print('Key: {} has length {}'.format(key, len(value)))
-                        for item in value:
-                            if item is not None:
-                                itemDate = item.get('asOfDate')
-                                itemFigure = item.get('reportedValue')
-                                writer.writerow([itemDate, key, itemFigure])
+                i = 0
+                for item in timeseries:
+                    key = item.get('meta').get('type')[0]
+                    # this timestamps logic is to check if yahoo actually returns any data for this ticker
+                    # ensure this only runs for annual entries, not trailing entries
+                    if key.startswith('annual'):
+                        timestamps = item.get('timestamp')
+                        if timestamps is not None and len(timestamps) > 0: 
+                            i += 1
+                    values = item.get(key)
+                    if values is not None and key.startswith('annual') and len(values) > 0:
+                        for entry in values:
+                            if entry is not None:
+                                entryDate = entry.get('asOfDate')
+                                entryFigure = entry.get('reportedValue').get('raw')
+                                writer.writerow([entryDate, key, entryFigure])
+                if i == 0:
+                    with open('../datafiles/tickeroutcome/nasdaq/annual_nodata.csv', 'a', newline='') as nodataCsv:
+                        print('%s has no data' % self.ticker)
+                        nodataWriter = csv.writer(nodataCsv)
+                        nodataWriter.writerow([self.ticker])
+                else:
+                    successWriter.writerow([self.ticker])
 
-        proxy = self.setup_proxy(proxy)
+        try:
+            proxy = self.setup_proxy(proxy)
+            annual_url = 'https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/premium/timeseries/%s?lang=en-US&region=US&symbol=%s&padTimeSeries=true&type=annualTaxEffectOfUnusualItems,trailingTaxEffectOfUnusualItems,annualTaxRateForCalcs,trailingTaxRateForCalcs,annualNormalizedEBITDA,trailingNormalizedEBITDA,annualNormalizedDilutedEPS,trailingNormalizedDilutedEPS,annualNormalizedBasicEPS,trailingNormalizedBasicEPS,annualTotalUnusualItems,trailingTotalUnusualItems,annualTotalUnusualItemsExcludingGoodwill,trailingTotalUnusualItemsExcludingGoodwill,annualNetIncomeFromContinuingOperationNetMinorityInterest,trailingNetIncomeFromContinuingOperationNetMinorityInterest,annualReconciledDepreciation,trailingReconciledDepreciation,annualReconciledCostOfRevenue,trailingReconciledCostOfRevenue,annualEBITDA,trailingEBITDA,annualEBIT,trailingEBIT,annualNetInterestIncome,trailingNetInterestIncome,annualInterestExpense,trailingInterestExpense,annualInterestIncome,trailingInterestIncome,annualContinuingAndDiscontinuedDilutedEPS,trailingContinuingAndDiscontinuedDilutedEPS,annualContinuingAndDiscontinuedBasicEPS,trailingContinuingAndDiscontinuedBasicEPS,annualNormalizedIncome,trailingNormalizedIncome,annualNetIncomeFromContinuingAndDiscontinuedOperation,trailingNetIncomeFromContinuingAndDiscontinuedOperation,annualTotalExpenses,trailingTotalExpenses,annualRentExpenseSupplemental,trailingRentExpenseSupplemental,annualReportedNormalizedDilutedEPS,trailingReportedNormalizedDilutedEPS,annualReportedNormalizedBasicEPS,trailingReportedNormalizedBasicEPS,annualTotalOperatingIncomeAsReported,trailingTotalOperatingIncomeAsReported,annualDividendPerShare,trailingDividendPerShare,annualDilutedAverageShares,trailingDilutedAverageShares,annualBasicAverageShares,trailingBasicAverageShares,annualDilutedEPS,trailingDilutedEPS,annualDilutedEPSOtherGainsLosses,trailingDilutedEPSOtherGainsLosses,annualTaxLossCarryforwardDilutedEPS,trailingTaxLossCarryforwardDilutedEPS,annualDilutedAccountingChange,trailingDilutedAccountingChange,annualDilutedExtraordinary,trailingDilutedExtraordinary,annualDilutedDiscontinuousOperations,trailingDilutedDiscontinuousOperations,annualDilutedContinuousOperations,trailingDilutedContinuousOperations,annualBasicEPS,trailingBasicEPS,annualBasicEPSOtherGainsLosses,trailingBasicEPSOtherGainsLosses,annualTaxLossCarryforwardBasicEPS,trailingTaxLossCarryforwardBasicEPS,annualBasicAccountingChange,trailingBasicAccountingChange,annualBasicExtraordinary,trailingBasicExtraordinary,annualBasicDiscontinuousOperations,trailingBasicDiscontinuousOperations,annualBasicContinuousOperations,trailingBasicContinuousOperations,annualDilutedNIAvailtoComStockholders,trailingDilutedNIAvailtoComStockholders,annualAverageDilutionEarnings,trailingAverageDilutionEarnings,annualNetIncomeCommonStockholders,trailingNetIncomeCommonStockholders,annualOtherunderPreferredStockDividend,trailingOtherunderPreferredStockDividend,annualPreferredStockDividends,trailingPreferredStockDividends,annualNetIncome,trailingNetIncome,annualMinorityInterests,trailingMinorityInterests,annualNetIncomeIncludingNoncontrollingInterests,trailingNetIncomeIncludingNoncontrollingInterests,annualNetIncomeFromTaxLossCarryforward,trailingNetIncomeFromTaxLossCarryforward,annualNetIncomeExtraordinary,trailingNetIncomeExtraordinary,annualNetIncomeDiscontinuousOperations,trailingNetIncomeDiscontinuousOperations,annualNetIncomeContinuousOperations,trailingNetIncomeContinuousOperations,annualEarningsFromEquityInterestNetOfTax,trailingEarningsFromEquityInterestNetOfTax,annualTaxProvision,trailingTaxProvision,annualPretaxIncome,trailingPretaxIncome,annualOtherIncomeExpense,trailingOtherIncomeExpense,annualOtherNonOperatingIncomeExpenses,trailingOtherNonOperatingIncomeExpenses,annualSpecialIncomeCharges,trailingSpecialIncomeCharges,annualGainOnSaleOfPPE,trailingGainOnSaleOfPPE,annualGainOnSaleOfBusiness,trailingGainOnSaleOfBusiness,annualOtherSpecialCharges,trailingOtherSpecialCharges,annualWriteOff,trailingWriteOff,annualImpairmentOfCapitalAssets,trailingImpairmentOfCapitalAssets,annualRestructuringAndMergernAcquisition,trailingRestructuringAndMergernAcquisition,annualSecuritiesAmortization,trailingSecuritiesAmortization,annualEarningsFromEquityInterest,trailingEarningsFromEquityInterest,annualGainOnSaleOfSecurity,trailingGainOnSaleOfSecurity,annualNetNonOperatingInterestIncomeExpense,trailingNetNonOperatingInterestIncomeExpense,annualTotalOtherFinanceCost,trailingTotalOtherFinanceCost,annualInterestExpenseNonOperating,trailingInterestExpenseNonOperating,annualInterestIncomeNonOperating,trailingInterestIncomeNonOperating,annualOperatingIncome,trailingOperatingIncome,annualOperatingExpense,trailingOperatingExpense,annualOtherOperatingExpenses,trailingOtherOperatingExpenses,annualOtherTaxes,trailingOtherTaxes,annualProvisionForDoubtfulAccounts,trailingProvisionForDoubtfulAccounts,annualDepreciationAmortizationDepletionIncomeStatement,trailingDepreciationAmortizationDepletionIncomeStatement,annualDepletionIncomeStatement,trailingDepletionIncomeStatement,annualDepreciationAndAmortizationInIncomeStatement,trailingDepreciationAndAmortizationInIncomeStatement,annualAmortization,trailingAmortization,annualAmortizationOfIntangiblesIncomeStatement,trailingAmortizationOfIntangiblesIncomeStatement,annualDepreciationIncomeStatement,trailingDepreciationIncomeStatement,annualResearchAndDevelopment,trailingResearchAndDevelopment,annualSellingGeneralAndAdministration,trailingSellingGeneralAndAdministration,annualSellingAndMarketingExpense,trailingSellingAndMarketingExpense,annualGeneralAndAdministrativeExpense,trailingGeneralAndAdministrativeExpense,annualOtherGandA,trailingOtherGandA,annualInsuranceAndClaims,trailingInsuranceAndClaims,annualRentAndLandingFees,trailingRentAndLandingFees,annualSalariesAndWages,trailingSalariesAndWages,annualGrossProfit,trailingGrossProfit,annualCostOfRevenue,trailingCostOfRevenue,annualTotalRevenue,trailingTotalRevenue,annualExciseTaxes,trailingExciseTaxes,annualOperatingRevenue,trailingOperatingRevenue&merge=false&period1=493590046&period2=1593637862&corsDomain=finance.yahoo.com' % (self.ticker, self.ticker)
+            annualData = self.session.get(url=annual_url, proxies=proxy).text
+            store(annualData)
+            
+        except Exception as e:
+            print('An error has occurred: %s' % str(e))
+            errorWriter.writerow([self.ticker, str(e)])
+            raise
+                
 
-        # get financials
-        url = '%s/%s' % (self._scrape_url, self.ticker)
-        financialsData = utils.get_json(url+'/financials', 'financials', self.driver, proxy)
-        financialsTimeSeriesData = financialsData['QuoteTimeSeriesStore']
+    # requires yahoo premium account and public IP located in the US
+    def _store_premium_quarterly_financials(self, freq, proxy=None, errorWriter=None, successWriter=None):
+        def store(data):
+            print('Storing quarterly %s' % self.ticker)
+            jsonData = json.loads(data)
+            timeseries = jsonData.get('timeseries').get('result')
+            with open('../datafiles/fundamentals/nasdaq/quarterly/{}.csv'.format(self.ticker), 'w', newline='') as csvFile:
+                writer = csv.writer(csvFile)
+                writer.writerow(['date', 'entry', 'figure'])
+                i = 0
+                for item in timeseries:
+                    key = item.get('meta').get('type')[0]
+                    # this timestamps logic is to check if yahoo actually returns any data for this ticker
+                    # ensure this only runs for annual entries, not trailing entries
+                    if key.startswith('quarterly'):
+                        timestamps = item.get('timestamp')
+                        if timestamps is not None and len(timestamps) > 0: 
+                            i += 1
+                    key = item.get('meta').get('type')[0]
+                    values = item.get(key)
+                    if values is not None and key.startswith('quarterly') and len(values) > 0:
+                        for entry in values:
+                            if entry is not None:
+                                entryDate = entry.get('asOfDate')
+                                entryFigure = entry.get('reportedValue').get('raw')
+                                writer.writerow([entryDate, key, entryFigure])
+                if i == 0:
+                    with open('../datafiles/tickeroutcome/nasdaq/quarterly_nodata.csv', 'a', newline='') as nodataCsv:
+                        print('%s has no data' % self.ticker)
+                        nodataWriter = csv.writer(nodataCsv)
+                        nodataWriter.writerow([self.ticker])
+                else:
+                    successWriter.writerow([self.ticker])
 
-        store(financialsTimeSeriesData)
+        try:        
+            # no quarterly data for ASX stonks
+            if self.ticker.endswith('.AX'):
+                return
+
+            proxy = self.setup_proxy(proxy)
+            quarterly_url = 'https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/premium/timeseries/%s?lang=en-US&region=US&symbol=%s&padTimeSeries=true&type=quarterlyTaxEffectOfUnusualItems,trailingTaxEffectOfUnusualItems,quarterlyTaxRateForCalcs,trailingTaxRateForCalcs,quarterlyNormalizedEBITDA,trailingNormalizedEBITDA,quarterlyNormalizedDilutedEPS,trailingNormalizedDilutedEPS,quarterlyNormalizedBasicEPS,trailingNormalizedBasicEPS,quarterlyTotalUnusualItems,trailingTotalUnusualItems,quarterlyTotalUnusualItemsExcludingGoodwill,trailingTotalUnusualItemsExcludingGoodwill,quarterlyNetIncomeFromContinuingOperationNetMinorityInterest,trailingNetIncomeFromContinuingOperationNetMinorityInterest,quarterlyReconciledDepreciation,trailingReconciledDepreciation,quarterlyReconciledCostOfRevenue,trailingReconciledCostOfRevenue,quarterlyEBITDA,trailingEBITDA,quarterlyEBIT,trailingEBIT,quarterlyNetInterestIncome,trailingNetInterestIncome,quarterlyInterestExpense,trailingInterestExpense,quarterlyInterestIncome,trailingInterestIncome,quarterlyContinuingAndDiscontinuedDilutedEPS,trailingContinuingAndDiscontinuedDilutedEPS,quarterlyContinuingAndDiscontinuedBasicEPS,trailingContinuingAndDiscontinuedBasicEPS,quarterlyNormalizedIncome,trailingNormalizedIncome,quarterlyNetIncomeFromContinuingAndDiscontinuedOperation,trailingNetIncomeFromContinuingAndDiscontinuedOperation,quarterlyTotalExpenses,trailingTotalExpenses,quarterlyRentExpenseSupplemental,trailingRentExpenseSupplemental,quarterlyReportedNormalizedDilutedEPS,trailingReportedNormalizedDilutedEPS,quarterlyReportedNormalizedBasicEPS,trailingReportedNormalizedBasicEPS,quarterlyTotalOperatingIncomeAsReported,trailingTotalOperatingIncomeAsReported,quarterlyDividendPerShare,trailingDividendPerShare,quarterlyDilutedAverageShares,trailingDilutedAverageShares,quarterlyBasicAverageShares,trailingBasicAverageShares,quarterlyDilutedEPS,trailingDilutedEPS,quarterlyDilutedEPSOtherGainsLosses,trailingDilutedEPSOtherGainsLosses,quarterlyTaxLossCarryforwardDilutedEPS,trailingTaxLossCarryforwardDilutedEPS,quarterlyDilutedAccountingChange,trailingDilutedAccountingChange,quarterlyDilutedExtraordinary,trailingDilutedExtraordinary,quarterlyDilutedDiscontinuousOperations,trailingDilutedDiscontinuousOperations,quarterlyDilutedContinuousOperations,trailingDilutedContinuousOperations,quarterlyBasicEPS,trailingBasicEPS,quarterlyBasicEPSOtherGainsLosses,trailingBasicEPSOtherGainsLosses,quarterlyTaxLossCarryforwardBasicEPS,trailingTaxLossCarryforwardBasicEPS,quarterlyBasicAccountingChange,trailingBasicAccountingChange,quarterlyBasicExtraordinary,trailingBasicExtraordinary,quarterlyBasicDiscontinuousOperations,trailingBasicDiscontinuousOperations,quarterlyBasicContinuousOperations,trailingBasicContinuousOperations,quarterlyDilutedNIAvailtoComStockholders,trailingDilutedNIAvailtoComStockholders,quarterlyAverageDilutionEarnings,trailingAverageDilutionEarnings,quarterlyNetIncomeCommonStockholders,trailingNetIncomeCommonStockholders,quarterlyOtherunderPreferredStockDividend,trailingOtherunderPreferredStockDividend,quarterlyPreferredStockDividends,trailingPreferredStockDividends,quarterlyNetIncome,trailingNetIncome,quarterlyMinorityInterests,trailingMinorityInterests,quarterlyNetIncomeIncludingNoncontrollingInterests,trailingNetIncomeIncludingNoncontrollingInterests,quarterlyNetIncomeFromTaxLossCarryforward,trailingNetIncomeFromTaxLossCarryforward,quarterlyNetIncomeExtraordinary,trailingNetIncomeExtraordinary,quarterlyNetIncomeDiscontinuousOperations,trailingNetIncomeDiscontinuousOperations,quarterlyNetIncomeContinuousOperations,trailingNetIncomeContinuousOperations,quarterlyEarningsFromEquityInterestNetOfTax,trailingEarningsFromEquityInterestNetOfTax,quarterlyTaxProvision,trailingTaxProvision,quarterlyPretaxIncome,trailingPretaxIncome,quarterlyOtherIncomeExpense,trailingOtherIncomeExpense,quarterlyOtherNonOperatingIncomeExpenses,trailingOtherNonOperatingIncomeExpenses,quarterlySpecialIncomeCharges,trailingSpecialIncomeCharges,quarterlyGainOnSaleOfPPE,trailingGainOnSaleOfPPE,quarterlyGainOnSaleOfBusiness,trailingGainOnSaleOfBusiness,quarterlyOtherSpecialCharges,trailingOtherSpecialCharges,quarterlyWriteOff,trailingWriteOff,quarterlyImpairmentOfCapitalAssets,trailingImpairmentOfCapitalAssets,quarterlyRestructuringAndMergernAcquisition,trailingRestructuringAndMergernAcquisition,quarterlySecuritiesAmortization,trailingSecuritiesAmortization,quarterlyEarningsFromEquityInterest,trailingEarningsFromEquityInterest,quarterlyGainOnSaleOfSecurity,trailingGainOnSaleOfSecurity,quarterlyNetNonOperatingInterestIncomeExpense,trailingNetNonOperatingInterestIncomeExpense,quarterlyTotalOtherFinanceCost,trailingTotalOtherFinanceCost,quarterlyInterestExpenseNonOperating,trailingInterestExpenseNonOperating,quarterlyInterestIncomeNonOperating,trailingInterestIncomeNonOperating,quarterlyOperatingIncome,trailingOperatingIncome,quarterlyOperatingExpense,trailingOperatingExpense,quarterlyOtherOperatingExpenses,trailingOtherOperatingExpenses,quarterlyOtherTaxes,trailingOtherTaxes,quarterlyProvisionForDoubtfulAccounts,trailingProvisionForDoubtfulAccounts,quarterlyDepreciationAmortizationDepletionIncomeStatement,trailingDepreciationAmortizationDepletionIncomeStatement,quarterlyDepletionIncomeStatement,trailingDepletionIncomeStatement,quarterlyDepreciationAndAmortizationInIncomeStatement,trailingDepreciationAndAmortizationInIncomeStatement,quarterlyAmortization,trailingAmortization,quarterlyAmortizationOfIntangiblesIncomeStatement,trailingAmortizationOfIntangiblesIncomeStatement,quarterlyDepreciationIncomeStatement,trailingDepreciationIncomeStatement,quarterlyResearchAndDevelopment,trailingResearchAndDevelopment,quarterlySellingGeneralAndAdministration,trailingSellingGeneralAndAdministration,quarterlySellingAndMarketingExpense,trailingSellingAndMarketingExpense,quarterlyGeneralAndAdministrativeExpense,trailingGeneralAndAdministrativeExpense,quarterlyOtherGandA,trailingOtherGandA,quarterlyInsuranceAndClaims,trailingInsuranceAndClaims,quarterlyRentAndLandingFees,trailingRentAndLandingFees,quarterlySalariesAndWages,trailingSalariesAndWages,quarterlyGrossProfit,trailingGrossProfit,quarterlyCostOfRevenue,trailingCostOfRevenue,quarterlyTotalRevenue,trailingTotalRevenue,quarterlyExciseTaxes,trailingExciseTaxes,quarterlyOperatingRevenue,trailingOperatingRevenue&merge=false&period1=493590046&period2=1593466751&corsDomain=finance.yahoo.com' % (self.ticker, self.ticker)
+            quarterlyData = self.session.get(url=quarterly_url, proxies=proxy).text
+            store(quarterlyData)
+            
+        except Exception as e:
+            print('An error has occurred: %s' % str(e))
+            errorWriter.writerow([self.ticker, str(e)])
+            raise
+
 
     def _get_holders(self, kind=None, proxy=None):
         proxy = self.setup_proxy(proxy)
@@ -556,8 +621,11 @@ class TickerBase():
             return data.to_dict()
         return data
 
-    def get_premium_financials(self, proxy=None, as_dict=False, freq='yearly'):
-        self._store_premium_financials(proxy)
+    def get_premium_financials(self, proxy=None, as_dict=False, freq='yearly', errorWriter=None, successWriter=None):
+        if freq == 'yearly':
+            self._store_premium_financials(freq, proxy, errorWriter=errorWriter, successWriter=successWriter)
+        else:
+            self._store_premium_quarterly_financials(freq, proxy, errorWriter=errorWriter, successWriter=successWriter)
 
     def get_balancesheet(self, proxy=None, as_dict=False, freq="yearly"):
         self._get_financials(proxy)

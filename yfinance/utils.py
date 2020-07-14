@@ -111,11 +111,8 @@ def getRequiredStores(page):
 def get_json(url, page, driver=None, proxy=None):
     stores = getRequiredStores(page)
 
-    print('url to retrieve', url)
     if driver is not None:
         driver.get(url)
-        html = driver.page_source
-    else:
         html = _requests.get(url=url, proxies=proxy).text
 
     for store in stores:

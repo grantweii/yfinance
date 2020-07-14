@@ -103,11 +103,11 @@ class Ticker(TickerBase):
             "puts": self._options2df(options['puts'], tz=tz)
         })
 
-    def store_premium_financials(self):
-        return self.get_premium_financials()
+    def store_premium_financials(self, errorWriter=None, successWriter=None):
+        return self.get_premium_financials(errorWriter=errorWriter, successWriter=successWriter)
 
-    def store_premium_quarterly_financials(self):
-        return self.get_premium_financials(freq='quarterly')
+    def store_premium_quarterly_financials(self, errorWriter=None, successWriter=None):
+        return self.get_premium_financials(freq='quarterly', errorWriter=errorWriter, successWriter=successWriter)
 
     # ------------------------
 
