@@ -8,3 +8,4 @@ env/*
 yfinance/data/*
 test.py
 playground.py
+postgres.py

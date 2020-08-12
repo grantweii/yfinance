@@ -44,7 +44,7 @@ from . import shared
 
 
 class TickerBase():
-    def __init__(self, ticker, driver, session, **kwargs):
+    def __init__(self, ticker, driver=None, session=None, **kwargs):
         self.ticker = ticker.upper()
         self.driver = driver
         self._history = None
