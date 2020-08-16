@@ -267,8 +267,6 @@ class TickerBase():
             # data is a list of income statement objects 
             # eg. { "researchDevelopment": 4887000000, "effectOfAccountingCharges": None, } for every year
             df = _pd.DataFrame(data).drop(columns=['maxAge'])
-            print('column', df.columns)
-            print('rows', df.index)
             for col in df.columns:
                 df[col] = _np.where(
                     df[col].astype(str) == '-', _np.nan, df[col])
