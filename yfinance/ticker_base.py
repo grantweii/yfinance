@@ -466,15 +466,36 @@ class TickerBase():
                 self._institutional_holders['% Out'] = self._institutional_holders[
                     '% Out'].str.replace('%', '').astype(float)/100
 
-    # TODO: Data currently is retrieved correctly just need to store and return to user
-    # append to current cash flow endpoint
-    # cashflow
-    def _get_cashflow(self, kind=None, proxy=None):
+    # returns cashflows as json
+    # Refactored completely by Grant
+    def _get_cashflow(self, proxy=None, freq='yearly'):
+        def cleanData(data):
+            jsonData = json.loads(data)
+            timeseries = jsonData.get('timeseries').get('result')
+            dict = {}
+            for item in timeseries:
+                key = item.get('meta').get('type')[0]
+                values = item.get(key)
+                if values is not None:
+                    for entry in values:
+                        if entry is not None:
+                            entryDate = entry.get('asOfDate')
+                            entryFigure = entry.get('reportedValue').get('raw')
+                            if key not in dict.keys():
+                                dict[key] = {}
+                            dict[key][entryDate] = entryFigure
+            return dict
+
         proxy = self.setup_proxy(proxy)
 
-        url = '%s/%s/cash-flow' % (self._scrape_url, self.ticker)
-        _time.sleep(1) # add delay before another request
-        cashflowData = utils.get_json(url, 'cashflow', proxy)['QuoteTimeSeriesStore']
+        if freq == 'yearly':
+            cashflowUrl = 'https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/%s?lang=en-AU&region=AU&symbol=%s&padTimeSeries=true&type=annualFreeCashFlow,trailingFreeCashFlow,annualCapitalExpenditure,trailingCapitalExpenditure,annualOperatingCashFlow,trailingOperatingCashFlow,annualEndCashPosition,trailingEndCashPosition,annualBeginningCashPosition,trailingBeginningCashPosition,annualChangeInCashSupplementalAsReported,trailingChangeInCashSupplementalAsReported,annualCashFlowFromContinuingFinancingActivities,trailingCashFlowFromContinuingFinancingActivities,annualNetOtherFinancingCharges,trailingNetOtherFinancingCharges,annualCashDividendsPaid,trailingCashDividendsPaid,annualRepurchaseOfCapitalStock,trailingRepurchaseOfCapitalStock,annualCommonStockIssuance,trailingCommonStockIssuance,annualRepaymentOfDebt,trailingRepaymentOfDebt,annualInvestingCashFlow,trailingInvestingCashFlow,annualNetOtherInvestingChanges,trailingNetOtherInvestingChanges,annualSaleOfInvestment,trailingSaleOfInvestment,annualPurchaseOfInvestment,trailingPurchaseOfInvestment,annualPurchaseOfBusiness,trailingPurchaseOfBusiness,annualOtherNonCashItems,trailingOtherNonCashItems,annualChangeInAccountPayable,trailingChangeInAccountPayable,annualChangeInInventory,trailingChangeInInventory,annualChangesInAccountReceivables,trailingChangesInAccountReceivables,annualChangeInWorkingCapital,trailingChangeInWorkingCapital,annualStockBasedCompensation,trailingStockBasedCompensation,annualDeferredIncomeTax,trailingDeferredIncomeTax,annualDepreciationAndAmortization,trailingDepreciationAndAmortization,annualNetIncome,trailingNetIncome&merge=false&period1=493590046&period2=1597921829&corsDomain=au.finance.yahoo.com' % (self.ticker, self.ticker)
+        else:
+            cashflowUrl = 'https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/%s?lang=en-AU&region=AU&symbol=%s&padTimeSeries=true&type=quarterlyFreeCashFlow,trailingFreeCashFlow,quarterlyCapitalExpenditure,trailingCapitalExpenditure,quarterlyOperatingCashFlow,trailingOperatingCashFlow,quarterlyEndCashPosition,trailingEndCashPosition,quarterlyBeginningCashPosition,trailingBeginningCashPosition,quarterlyChangeInCashSupplementalAsReported,trailingChangeInCashSupplementalAsReported,quarterlyCashFlowFromContinuingFinancingActivities,trailingCashFlowFromContinuingFinancingActivities,quarterlyNetOtherFinancingCharges,trailingNetOtherFinancingCharges,quarterlyCashDividendsPaid,trailingCashDividendsPaid,quarterlyRepurchaseOfCapitalStock,trailingRepurchaseOfCapitalStock,quarterlyCommonStockIssuance,trailingCommonStockIssuance,quarterlyRepaymentOfDebt,trailingRepaymentOfDebt,quarterlyInvestingCashFlow,trailingInvestingCashFlow,quarterlyNetOtherInvestingChanges,trailingNetOtherInvestingChanges,quarterlySaleOfInvestment,trailingSaleOfInvestment,quarterlyPurchaseOfInvestment,trailingPurchaseOfInvestment,quarterlyPurchaseOfBusiness,trailingPurchaseOfBusiness,quarterlyOtherNonCashItems,trailingOtherNonCashItems,quarterlyChangeInAccountPayable,trailingChangeInAccountPayable,quarterlyChangeInInventory,trailingChangeInInventory,quarterlyChangesInAccountReceivables,trailingChangesInAccountReceivables,quarterlyChangeInWorkingCapital,trailingChangeInWorkingCapital,quarterlyStockBasedCompensation,trailingStockBasedCompensation,quarterlyDeferredIncomeTax,trailingDeferredIncomeTax,quarterlyDepreciationAndAmortization,trailingDepreciationAndAmortization,quarterlyNetIncome,trailingNetIncome&merge=false&period1=493590046&period2=1597926642&corsDomain=au.finance.yahoo.com' % (self.ticker, self.ticker)
+        data = _requests.get(url=cashflowUrl, proxies=proxy).text
+
+        cashflows = cleanData(data)
+        return cashflows
 
     def _get_sustainability(self, kind=None, proxy=None):
         proxy = self.setup_proxy(proxy)
@@ -619,6 +640,7 @@ class TickerBase():
             return data.to_dict()
         return data
 
+    # Created by Grant
     def get_premium_financials(self, proxy=None, as_dict=False, freq='yearly', errorWriter=None, successWriter=None):
         if freq == 'yearly':
             self._store_premium_financials(freq, proxy, errorWriter=errorWriter, successWriter=successWriter)
@@ -635,11 +657,9 @@ class TickerBase():
     def get_balance_sheet(self, proxy=None, as_dict=False, freq="yearly"):
         return self.get_balancesheet(proxy, as_dict, freq)
 
+    # Refactored completely by Grant
     def get_cashflow(self, proxy=None, as_dict=False, freq="yearly"):
-        self._get_financials(proxy)
-        data = self._cashflow[freq]
-        if as_dict:
-            return data.to_dict()
+        data = self._get_cashflow(proxy, freq)
         return data
 
     def get_dividends(self, proxy=None):
