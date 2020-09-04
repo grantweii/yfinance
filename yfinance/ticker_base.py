@@ -481,8 +481,6 @@ class TickerBase():
                         if entry is not None:
                             entryDate = entry.get('asOfDate')
                             entryFigure = entry.get('reportedValue').get('raw')
-                            if key not in dict.keys():
-                                dict[key] = {}
                             dict[key][entryDate] = entryFigure
             return dict
 
@@ -525,7 +523,9 @@ class TickerBase():
 
         # get info
         url = '%s/%s' % (self._scrape_url, self.ticker)
-        infoData = utils.get_json(url, 'info', proxy)['QuoteSummaryStore']
+        # attempt to retrieve 3 times
+        data = utils.get_json(url, 'info', proxy)
+        infoData = data.get('QuoteSummaryStore')
 
         # info (be nice to python 2)
         self._info = {}
@@ -535,7 +535,7 @@ class TickerBase():
             if isinstance(infoData.get(item), dict):
                 self._info.update(infoData[item])
 
-        self._info['regularMarketPrice'] = self._info['regularMarketOpen']
+        # self._info['regularMarketPrice'] = self._info['regularMarketOpen']
         self._info['logo_url'] = ""
         try:
             domain = self._info['website'].split(
