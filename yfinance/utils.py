@@ -140,6 +140,7 @@ def camel2title(o):
     return [_re.sub("([a-z])([A-Z])", "\g<1> \g<2>", i).title() for i in o]
 
 
+# this method replaces Close, High, Open, Low with their adjusted values
 def auto_adjust(data):
     df = data.copy()
     ratio = df["Close"] / df["Adj Close"]

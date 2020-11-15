@@ -81,7 +81,7 @@ class TickerBase():
     def history(self, period="1mo", interval="1d",
                 start=None, end=None, prepost=False, actions=True,
                 auto_adjust=True, back_adjust=False,
-                proxy=None, rounding=True, tz=None, **kwargs):
+                proxy=None, rounding=True, tz=None, adjust=False, **kwargs):
         """
         :Parameters:
             period : str
@@ -212,10 +212,11 @@ class TickerBase():
             except Exception:
                 pass
 
-        if auto_adjust:
-            quotes = utils.auto_adjust(quotes)
-        elif back_adjust:
-            quotes = utils.back_adjust(quotes)
+        if adjust:
+            if auto_adjust:
+                quotes = utils.auto_adjust(quotes)
+            elif back_adjust:
+                quotes = utils.back_adjust(quotes)
 
         if rounding:
             quotes = _np.round(quotes, data[
